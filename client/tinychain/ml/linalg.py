@@ -12,13 +12,15 @@ def identity(size, dtype=F32):
     return Sparse.copy_from(schema, Stream.range((0, size)).map(get_op(lambda i: ((i, i), 1))))
 
 
+# TODO: vectorize to support a `Tensor` containing a batch of matrices
 def householder(a):
-    """Returns a Householder transform for the matrices in `a`"""
+    """Returns a Householder transform for the matrix `a`"""
 
-    v = a / (a[:, 0] + (norm(a) * a.sign()))
-    tau = 2 / einsum("bji,jk->bik", [v, v])
+    norm = (a**2).sum()**0.5
+    v = (a / (a[0] + norm)).copy()
+    tau = 2 / einsum("ji,jk->ik", [v, v])
 
-    return Tuple(After(v.write([slice(None), 0], 1), [v, tau]))
+    return Tuple(After(v.write([0], 1), [v, tau]))
 
 
 def norm(tensor: Tensor) -> Tensor:
@@ -32,45 +34,41 @@ def norm(tensor: Tensor) -> Tensor:
     """
 
     squared = tensor**2
-    return If(tensor.ndim() == 2,
+    return If(tensor.ndim == 2,
               squared.sum()**0.5,
               squared.sum(-1).sum(-1)**0.5)
 
 
+# TODO: vectorize to support a `Tensor` containing a batch of matrices
 @post_op
-def qr(matrices: Tensor) -> Tuple:
-    """Compute the QR factorization of the given `matrices`.
+def qr(cxt, matrix: Tensor) -> Tuple:
+    """Compute the QR factorization of the given `matrix`.
 
     Args:
-        `a`: a batch of matrices with shape `[batch_dim, M, N]`
+        `a`: a matrix with shape `[M, N]`
 
     Returns:
-        A `Tuple` of `Tensor` objects with shapes `([batch_dim, M], [batch_dim, N])`
+        A `Tuple` of `Tensor` objects `(Q, R)` where `A ~= QR` and `Q.transpose() == Q**-1`
     """
 
-    batch_dim = matrices.shape()[0]
-    n = UInt(matrices.shape()[1])
-    m = UInt(matrices.shape()[2])
+    cxt.m = UInt(matrix.shape[0])
+    cxt.n = UInt(matrix.shape[1])
 
-    R = matrices
-    Q = identity(m) + Dense.ones([batch_dim, 1, 1])
-
+    outer_cxt = cxt
     def qr_step(Q: Tensor, R: Tensor, k: UInt) -> Map:
         transform = householder(R[k:, k].expand_dims())
         v = transform[0]
         tau = transform[1]
 
-        H = identity(m)
-        H_sub = H[k:, k:] - (tau * einsum("bji,bjk->bik", [v, v]))
+        H = identity(outer_cxt.m)  # TODO: convert to a Dense tensor of type F32
+        H_sub = H[k:, k:] - (tau * einsum("ji,jk->ik", [v, v]))
         return After(H.write([slice(k, None), slice(k, None)], H_sub), {
-            "Q": einsum("bij,bjk->bik", [H, R]),
-            "R": einsum("bij,bjk->bik", [H, Q]),
+            "Q": einsum("ij,jk->ik", [H, Q]),
+            "R": einsum("ij,jk->ik", [H, R]),
         })
 
-    Q_R = Stream.range((0, n - 1)).fold("k", Map(Q=Q, R=R), closure(post_op(qr_step)))
-    Q = Tensor(Q_R[0])
-    R = Tensor(Q_R[1])
-    return Q[:n].transpose([0, 2, 1]), R[:n]
+    iterations = cxt.n - 1  # TODO: If(cxt.n == cxt.m, cxt.n - 1, cxt.n)
+    return Stream.range(iterations).fold("k", Map(Q=identity(cxt.m), R=matrix), closure(post_op(qr_step)))
 
 
 @post_op

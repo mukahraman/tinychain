@@ -24,17 +24,21 @@ class LinearAlgebraTests(ClientTest):
         self.assertEqual(actual, expected)
 
     def testQR(self):
-        matrix = np.arange(6).reshape([2, 3])
+        shape = [3, 4]
+        matrix = np.arange(12).reshape(shape)
 
         cxt = tc.Context()
-        cxt.matrices = tc.tensor.Dense.load([1, 2, 3], tc.I32, matrix.flatten().tolist())
+        cxt.matrix = tc.tensor.Dense.load(shape, tc.F32, matrix.flatten().tolist())
         cxt.qr = tc.linalg.qr
-        cxt.result = cxt.qr(matrices=cxt.matrices)
+        cxt.result = cxt.qr(matrix=cxt.matrix)
 
-        expected = [np.linalg.qr(matrix)]
+        expected = np.linalg.qr(matrix)
+
+        import json
+        print(json.dumps(tc.to_json(cxt), indent=4))
 
         actual = self.host.post(ENDPOINT, cxt)
-        print(expected)
+        print(expected[0].shape, expected[1].shape)
         print(actual)
 
 if __name__ == "__main__":
