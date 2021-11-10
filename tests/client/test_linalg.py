@@ -7,7 +7,7 @@ from testutils import ClientTest
 ENDPOINT = "/transact/hypothetical"
 
 
-class DNNTests(ClientTest):
+class LinearAlgebraTests(ClientTest):
     def testNorm(self):
         shape = [2, 3, 4]
         matrices = np.arange(24).reshape(shape)
@@ -22,6 +22,20 @@ class DNNTests(ClientTest):
         actual = actual[tc.uri(tc.tensor.Dense)][1]
 
         self.assertEqual(actual, expected)
+
+    def testQR(self):
+        matrix = np.arange(6).reshape([2, 3])
+
+        cxt = tc.Context()
+        cxt.matrices = tc.tensor.Dense.load([1, 2, 3], tc.I32, matrix.flatten().tolist())
+        cxt.qr = tc.linalg.qr
+        cxt.result = cxt.qr(matrices=cxt.matrices)
+
+        expected = [np.linalg.qr(matrix)]
+
+        actual = self.host.post(ENDPOINT, cxt)
+        print(expected)
+        print(actual)
 
 
 if __name__ == "__main__":
