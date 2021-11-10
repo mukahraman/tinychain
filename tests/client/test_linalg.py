@@ -37,6 +37,5 @@ class LinearAlgebraTests(ClientTest):
         print(expected)
         print(actual)
 
-
 if __name__ == "__main__":
     unittest.main()
